@@ -646,9 +646,10 @@ set_new_congestion <- function(r5r_network, new_carspeeds, carspeed_scale) {
                                                "poly_id",
                                                rJava::.jfloat(carspeed_scale))
     } else { # OSM mode or scale != 1
-      speed_map <- dt_to_speed_map(new_carspeeds)
+      speed_maps <- dt_to_speed_maps_dir(new_carspeeds)
       absolute_mode <- !is.null(new_carspeeds) && (new_carspeeds$speed_type[1] == "km/h")
-      errors <- r5r_network$applyCongestionOsm(speed_map,
+      errors <- r5r_network$applyCongestionOsm(speed_maps$fwd,
+                                     speed_maps$bwd,
                                      rJava::.jfloat(carspeed_scale),
                                      absolute_mode)
     }

@@ -58,10 +58,40 @@ dt_to_speed_map <- function(dt) {
 
   # Create new HashMap<long, float>
   map_builder <- rJava::.jnew("org.ipea.r5r.Utils.RMapBuilder")
-  speed_map <- map_builder$buildSpeedMap(paste(as.character(dt$osm_id), collapse = ","),
-                                        paste(as.character(dt$max_speed), collapse = ","))
+  speed_map <- map_builder$buildSpeedMap(paste(format(dt$osm_id, scientific = FALSE, trim = TRUE), collapse = ","),
+                                        paste(format(dt$max_speed, scientific = FALSE, trim = TRUE), collapse = ","))
 
   return(speed_map)
+}
+
+#' Convert a carspeeds data.frame to forward/backward Java speed maps
+#'
+#' @description Direction-aware version. If the data.frame has a `direction`
+#'   column (0 = forward/up, 1 = backward/down), rows are split into two maps.
+#'   If absent, the same speeds are used for both directions.
+#'
+#' @param dt data.frame with columns osm_id, max_speed, speed_type, and
+#'   optionally direction (0/1).
+#' @return A list with elements `fwd` and `bwd`, each a Java HashMap<Long,Float>.
+#' @family java support functions
+#' @keywords internal
+dt_to_speed_maps_dir <- function(dt) {
+  if (is.null(dt)) {
+    empty <- rJava::.jnew("java/util/HashMap")
+    return(list(fwd = empty, bwd = empty))
+  }
+  if (!"direction" %in% names(dt)) {
+    # undirected: same map for both directions
+    m <- dt_to_speed_map(dt)
+    return(list(fwd = m, bwd = m))
+  }
+  checkmate::assert_true(all(dt$direction %in% c(0, 1)))
+  dt_fwd <- dt[dt$direction == 0, , drop = FALSE]
+  dt_bwd <- dt[dt$direction == 1, , drop = FALSE]
+  # each split must still satisfy dt_to_speed_map's column checks
+  fwd <- if (nrow(dt_fwd)) dt_to_speed_map(dt_fwd) else rJava::.jnew("java/util/HashMap")
+  bwd <- if (nrow(dt_bwd)) dt_to_speed_map(dt_bwd) else rJava::.jnew("java/util/HashMap")
+  return(list(fwd = fwd, bwd = bwd))
 }
 
 
@@ -95,7 +125,7 @@ dt_to_lts_map <- function(dt) {
 
   # Create new HashMap<Long, Integer>
   map_builder <- rJava::.jnew("org.ipea.r5r.Utils.RMapBuilder")
-  lts_map <- map_builder$buildLtsMap(paste(as.character(dt$osm_id), collapse = ","),
+  lts_map <- map_builder$buildLtsMap(paste(format(dt$osm_id, scientific = FALSE, trim = TRUE), collapse = ","),
                                          paste(as.character(dt$lts), collapse = ","))
 
   return(lts_map)

@@ -17,14 +17,14 @@ exec {
     commandLine 'R', '--no-save', '-q', '-s', '-e', 'setwd("../r-package"); devtools::load_all(quiet=T); cat(download_r5());'
     standardOutput = baos
 }
-def r5Path = baos.toString().trim().readLines().findAll{it.trim()}.last().trim()
+def r5Path = baos.toString()
 
 def rjava_baos = new ByteArrayOutputStream()
 exec {
     commandLine 'R', '--no-save', '-q', '-s', '-e', 'cat(system.file("jri/JRI.jar", package="rJava"))'
     standardOutput = rjava_baos
 }
-def rJavaPath = rjava_baos.toString().trim().readLines().findAll{it.trim()}.last().trim()
+def rJavaPath = rjava_baos.toString()
 
 println(rJavaPath)
 
