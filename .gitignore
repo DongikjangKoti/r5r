@@ -34,3 +34,6 @@ aws.xml
 docs/
 network_settings.json
 r-package/rjavaenv/
+*.orig
+*.orig2
+*.bak
