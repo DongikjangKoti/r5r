@@ -240,6 +240,7 @@ public abstract class R5Process<T, A> {
         request.fromLon = fromLons[index];
         request.walkSpeed = (float) routingProperties.walkSpeed;
         request.bikeSpeed = (float) routingProperties.bikeSpeed;
+        request.carSpeed = 41.7f;   // ★ 150 km/h. A* heuristic admissibility 보장
         request.streetTime = maxTripDuration;
         request.maxWalkTime = maxWalkTime;
         request.maxBikeTime = maxBikeTime;
