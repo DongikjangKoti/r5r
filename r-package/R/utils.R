@@ -128,6 +128,10 @@ start_r5r_java <- function(data_path,
   r5r_jar <- system.file("jar/r5r.jar", package = "r5r")
   rJava::.jaddClassPath(path = r5r_jar)
 
+  # sqlite-jdbc for direct-to-DB TTM output (koti-db-sink); self-contained single jar
+  sqlite_jar <- system.file("jar/sqlite-jdbc-3.53.2.1.jar", package = "r5r")
+  if (nzchar(sqlite_jar)) rJava::.jaddClassPath(path = sqlite_jar)
+
   # r5r jar
   # check if the most recent JAR release is stored already.
   fileurl <- fileurl_from_metadata( r5r_env$r5_jar_version )

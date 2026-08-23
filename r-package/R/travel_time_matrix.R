@@ -137,7 +137,13 @@ travel_time_matrix <- function(r5r_network,
                                n_threads = Inf,
                                verbose = FALSE,
                                progress = FALSE,
-                               output_dir = NULL) {
+                               output_dir = NULL,
+                               output_db = NULL,
+                               scenario_id = 0L,
+                               db_queue_capacity = 64L,
+                               db_commit_every = 1000L,
+                               db_compression_level = 6L,
+                               db_wal_autocheckpoint = 0L) {
 
   # deprecating r5r_core --------------------------------------
   if (lifecycle::is_present(r5r_core)) {
@@ -172,6 +178,61 @@ travel_time_matrix <- function(r5r_network,
 
   checkmate::assert_class(r5r_network, "r5r_network")
   r5r_network <- r5r_network@jcore
+
+  # direct-to-DB output orchestration (koti-db-sink) --------------------------
+  # Public function runs ONCE; resume is input substitution (origins <- todo),
+  # never a recursive travel_time_matrix() call.
+  if (!is.null(output_db)) {
+    if (!is.null(output_dir)) {
+      stop("'output_dir' and 'output_db' are mutually exclusive.", call. = FALSE)
+    }
+    checkmate::assert_string(output_db)
+    checkmate::assert_count(db_queue_capacity, positive = TRUE)
+    checkmate::assert_count(db_commit_every, positive = TRUE)
+    checkmate::assert_int(db_compression_level, lower = 0, upper = 9)
+    checkmate::assert_int(db_wal_autocheckpoint, lower = 0)
+    if (max_trip_duration > 65534) {
+      stop("output_db supports max_trip_duration <= 65534 minutes (uint16).", call. = FALSE)
+    }
+    if (anyDuplicated(origins$id) > 0 || anyDuplicated(destinations$id) > 0) {
+      stop("output_db requires unique origin and destination ids (DB primary key).",
+           call. = FALSE)
+    }
+    # v1 supports only square matrices: ordered IDs AND coordinates must match.
+    # (fingerprint = ordered id + lon + lat; same hash feeds meta origin/dest_hash)
+    if (!identical(ttm_fingerprint(origins), ttm_fingerprint(destinations))) {
+      stop("output_db v1 supports only square matrices with identical ordered ",
+           "origin/destination IDs and coordinates.", call. = FALSE)
+    }
+
+    ttm_meta <- list(
+      schema_version      = "1",
+      payload_version     = "1",
+      layout              = "1",
+      codec               = "1",
+      compression_level   = as.character(db_compression_level),
+      unit                = "minutes",
+      sentinel            = if (max_trip_duration <= 254) "uint8_255" else "uint16_65535",
+      width               = if (max_trip_duration <= 254) "1" else "2",
+      mode                = paste(mode, collapse = ";"),
+      departure_datetime  = format(departure_datetime, "%Y-%m-%d %H:%M:%S"),
+      time_window_size    = as.character(time_window),
+      max_trip_duration   = as.character(max_trip_duration),
+      percentiles         = paste(percentiles, collapse = ","),
+      n_dest              = as.character(nrow(destinations)),
+      network_file        = basename(r5r_network$getDataPath()),
+      r5r_version         = as.character(utils::packageVersion("r5r")),
+      r5_version          = r5r_env$r5_jar_version,
+      sqlite_jdbc_version = "3.53.2.1"
+    )
+    ttm_init_or_validate_db(output_db, destinations, ttm_meta, scenario_id)
+
+    origins <- ttm_resume_origins(output_db, origins, scenario_id)
+    if (nrow(origins) == 0L) {
+      message("Scenario already complete: ", output_db)
+      return(output_db)                       # no linkage rebuild at all
+    }
+  }
 
   # in direct modes reverse origin/destination to take advantage of R5's One to Many algorithm
   data_path <- r5r_network$getDataPath()
@@ -218,6 +279,9 @@ travel_time_matrix <- function(r5r_network,
   set_fare_structure(r5r_network, fare_structure)
   set_max_fare(r5r_network, max_fare)
   set_output_dir(r5r_network, output_dir)
+  set_output_db(r5r_network, output_db, scenario_id,
+                db_queue_capacity, db_commit_every,
+                db_compression_level, db_wal_autocheckpoint)
   set_expanded_travel_times(r5r_network, FALSE)
   set_breakdown(r5r_network, FALSE)
   r5r_network$setSearchType("DEPART_FROM")
@@ -247,6 +311,8 @@ travel_time_matrix <- function(r5r_network,
     max_car_time,
     max_trip_duration
   )
+
+  if (!is.null(output_db)) return(output_db)   # DB mode: Java returned an empty frame
 
   if (!verbose & progress) cat("Preparing final output...", file = stderr())
 

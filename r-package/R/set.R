@@ -343,6 +343,27 @@ set_output_dir <- function(r5r_network, output_dir) {
   return(invisible(TRUE))
 }
 
+#' Set direct-to-SQLite output (koti-db-sink)
+#'
+#' Configuration only: the sink (connection + writer thread) is created inside
+#' R5Process.run(). Must be called on EVERY travel_time_matrix() invocation,
+#' with output_db = NULL resetting the flags (mirrors set_output_dir).
+#' wal_autocheckpoint: 0 = SQLite default (1000 pages), >0 = page threshold.
+#' Wiring: R arg -> setDbOutput() -> Utils.walAutoCheckpoint -> TtmSink -> PRAGMA.
+#' @keywords internal
+set_output_db <- function(r5r_network, output_db, scenario_id = 0L,
+                          queue_capacity = 64L, commit_every = 1000L,
+                          compression_level = 6L, wal_autocheckpoint = 0L) {
+  checkmate::assert_string(output_db, null.ok = TRUE)
+  if (!is.null(output_db)) {
+    r5r_network$setDbOutput(output_db, as.integer(scenario_id),
+                            as.integer(queue_capacity), as.integer(commit_every),
+                            as.integer(compression_level), as.integer(wal_autocheckpoint))
+  } else {
+    r5r_network$setDbOutput("", 0L, 0L, 0L, 0L, 0L)
+  }
+}
+
 
 #' Set cutoffs
 #'

@@ -28,6 +28,16 @@ public class Utils {
     static public boolean saveOutputToCsv = false;
     static public String outputCsvFolder = "";
 
+    // --- direct-to-DB output (koti-db-sink) ---
+    static public boolean saveOutputToDb    = false;
+    static public String  outputDbPath      = "";
+    static public int     outputScenarioId  = 0;
+    static public int     queueCapacity     = 64;
+    static public int     commitEvery       = 1000;
+    static public int     compressionLevel  = 6;
+    static public int     walAutoCheckpoint = 0;      // 0 = SQLite default (1000 pages)
+    static public TtmSink ttmSink           = null;   // created/closed only inside R5Process.run()
+
     public synchronized static Level getLogLevel() { return logLevel; }
     public synchronized static void setLogLevel(Level l) { logLevel = l; }
 

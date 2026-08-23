@@ -12,6 +12,7 @@ import com.conveyal.r5.transit.path.RouteSequence;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
 import org.ipea.r5r.R5.R5TravelTimeComputer;
+import org.ipea.r5r.Utils.TtmSink;
 import org.ipea.r5r.RDataFrame;
 import org.ipea.r5r.RoutingProperties;
 import org.ipea.r5r.Utils.Utils;
@@ -107,7 +108,35 @@ public class TravelTimeMatrixComputer extends R5DataFrameProcess {
         RegionalTask request = buildRegionalTask(index);
 
         TravelTimeComputer computer = new R5TravelTimeComputer(request, transportNetwork);
+        long t0 = System.currentTimeMillis();
         OneOriginResult travelTimeResults = computer.computeTravelTimes();
+
+        // ---- direct-to-DB fast path (regular TTM only; koti-db-sink) ----
+        if (Utils.saveOutputToDb && Utils.ttmSink != null
+                && !this.routingProperties.expandedTravelTimes) {
+            int[][] v = travelTimeResults.travelTimes.getValues();  // [percentile][destination], dense
+            int nDest = v[0].length;
+            if (nDest != nDestinations) {
+                throw new IllegalStateException(
+                    "dense array length " + nDest + " != nDestinations " + nDestinations);
+            }
+            int width = (maxTripDuration <= 254) ? 1 : 2;           // >65534 fails fast in encode()
+
+            int reached = TtmSink.countReached(v[0], maxTripDuration);
+            byte[] payload = TtmSink.encode(v, nDest, width,
+                                            maxTripDuration, Utils.compressionLevel);
+            try {
+                Utils.ttmSink.submit(new TtmSink.Item(
+                    Utils.outputScenarioId, fromIds[index], index,
+                    v.length, nDest, width, reached,
+                    System.currentTimeMillis() - t0, payload));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(e);
+            }
+            return null;   // RDataFrame is never built on this path
+        }
+        // ---- legacy path ----
         RDataFrame travelTimesTable = buildDataFrameStructure(fromIds[index], 10);
         populateDataFrame(travelTimeResults, travelTimesTable);
 

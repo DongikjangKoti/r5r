@@ -228,6 +228,39 @@ public class R5RCore {
         return Utils.outputCsvFolder;
     }
 
+    /**
+     * Configure direct-to-SQLite output. Configuration ONLY — the sink (connection +
+     * writer thread) is created inside R5Process.run()'s try/finally lifecycle.
+     */
+    public void setDbOutput(String dbPath, int scenarioId,
+                            int queueCapacity, int commitEvery, int compressionLevel,
+                            int walAutoCheckpoint) {
+        if (!dbPath.equals("")) {
+            if (Utils.ttmSink != null)
+                throw new IllegalStateException("TtmSink already active");
+            if (queueCapacity < 1)  throw new IllegalArgumentException("queueCapacity must be >= 1");
+            if (commitEvery  < 1)   throw new IllegalArgumentException("commitEvery must be >= 1");
+            if (compressionLevel < 0 || compressionLevel > 9)
+                throw new IllegalArgumentException("compressionLevel must be in 0..9");
+            if (walAutoCheckpoint < 0)
+                throw new IllegalArgumentException("walAutoCheckpoint must be >= 0");
+            Utils.saveOutputToDb    = true;
+            Utils.outputDbPath      = dbPath;
+            Utils.outputScenarioId  = scenarioId;
+            Utils.queueCapacity     = queueCapacity;
+            Utils.commitEvery       = commitEvery;
+            Utils.compressionLevel  = compressionLevel;
+            Utils.walAutoCheckpoint = walAutoCheckpoint;
+        } else {
+            if (Utils.ttmSink != null)
+                throw new IllegalStateException("cannot reset while TtmSink active");
+            Utils.saveOutputToDb = false;
+            Utils.outputDbPath   = "";
+        }
+    }
+
+    public String getOutputDbPath() { return Utils.outputDbPath; }
+
     public String getLogPath() { return System.getProperty("LOG_PATH"); }
 
     public void setDetailedItinerariesV2(boolean v2) {

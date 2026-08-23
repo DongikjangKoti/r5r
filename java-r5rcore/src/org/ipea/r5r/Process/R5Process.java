@@ -1,6 +1,7 @@
 package org.ipea.r5r.Process;
 
 import java.io.*;
+import java.sql.SQLException;
 import java.text.ParseException;
 import java.time.LocalDate;
 import java.util.EnumSet;
@@ -14,6 +15,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import org.ipea.r5r.RoutingProperties;
+import org.ipea.r5r.Utils.TtmSink;
 import org.ipea.r5r.Utils.Utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -74,11 +76,25 @@ public abstract class R5Process<T, A> {
     }
 
     public A run() throws ExecutionException, InterruptedException {
-        buildDestinationPointSet();
         // TODO shouldn't this start at 0?
         AtomicInteger totalProcessed = new AtomicInteger(1);
 
+        Exception primary = null;
         try {
+            buildDestinationPointSet();                        // inside try: pointset/linkage
+                                                               // failures reach the same finally
+
+            if (Utils.saveOutputToDb) {                        // resource acquisition inside try;
+                try {                                          // after pointset so a pointset failure
+                    Utils.ttmSink = new TtmSink(               // never even creates the DB file
+                        Utils.outputDbPath, Utils.queueCapacity,
+                        Utils.commitEvery, Utils.walAutoCheckpoint);
+                } catch (SQLException | ClassNotFoundException e) {
+                    // keep run()'s public signature; cause is preserved through to R
+                    throw new RuntimeException("Failed to initialize TTM SQLite sink", e);
+                }
+            }
+
             // define callable separately so that Java compiler can check types
             // h/t ChatGPT
             Callable<List<T>> task = () ->
@@ -101,7 +117,27 @@ public abstract class R5Process<T, A> {
             e.printStackTrace(pw);
             LOG.error(sw.toString());
 
+            primary = e;
             throw e;
+        } finally {
+            // Storage failure IS a run failure: close (final commit) must succeed, and
+            // sink/flag state must be reset on every exit path (success, routing failure,
+            // pointset failure, sink-init failure).
+            if (Utils.ttmSink != null) {
+                try {
+                    Utils.ttmSink.close();          // POISON -> writer join -> final commit
+                } catch (Exception ce) {
+                    if (primary != null) {
+                        primary.addSuppressed(ce);  // merge into the routing exception
+                    } else {
+                        Utils.ttmSink = null;
+                        Utils.saveOutputToDb = false;
+                        throw new RuntimeException("TTM DB final commit/close failed", ce);
+                    }
+                }
+                Utils.ttmSink = null;
+            }
+            Utils.saveOutputToDb = false;
         }
     }
 

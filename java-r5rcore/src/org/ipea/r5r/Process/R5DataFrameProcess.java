@@ -83,8 +83,9 @@ public abstract class R5DataFrameProcess extends R5Process<RDataFrame, RDataFram
             }
         } catch (Exception e) {
             e.printStackTrace();
-            // re-throw as unchecked so we get an error on the R side
-            throw new RuntimeException();
+            // re-throw as unchecked so we get an error on the R side;
+            // preserve the cause so SQLITE_FULL / UNIQUE violations etc. are visible in R
+            throw new RuntimeException(e);
         }
 
         return Utils.saveOutputToCsv ? null : results;
