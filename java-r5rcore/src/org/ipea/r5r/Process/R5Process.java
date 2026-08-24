@@ -15,6 +15,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import org.ipea.r5r.RoutingProperties;
+import org.ipea.r5r.Utils.ExpTtmSink;
 import org.ipea.r5r.Utils.TtmSink;
 import org.ipea.r5r.Utils.Utils;
 import org.slf4j.Logger;
@@ -86,9 +87,14 @@ public abstract class R5Process<T, A> {
 
             if (Utils.saveOutputToDb) {                        // resource acquisition inside try;
                 try {                                          // after pointset so a pointset failure
-                    Utils.ttmSink = new TtmSink(               // never even creates the DB file
-                        Utils.outputDbPath, Utils.queueCapacity,
-                        Utils.commitEvery, Utils.walAutoCheckpoint);
+                    if (Utils.dbOutputExpanded) {              // never even creates the DB file
+                        Utils.expTtmSink = new ExpTtmSink(
+                            Utils.outputDbPath, Utils.queueCapacity, Utils.walAutoCheckpoint);
+                    } else {
+                        Utils.ttmSink = new TtmSink(
+                            Utils.outputDbPath, Utils.queueCapacity,
+                            Utils.commitEvery, Utils.walAutoCheckpoint);
+                    }
                 } catch (SQLException | ClassNotFoundException e) {
                     // keep run()'s public signature; cause is preserved through to R
                     throw new RuntimeException("Failed to initialize TTM SQLite sink", e);
@@ -123,21 +129,26 @@ public abstract class R5Process<T, A> {
             // Storage failure IS a run failure: close (final commit) must succeed, and
             // sink/flag state must be reset on every exit path (success, routing failure,
             // pointset failure, sink-init failure).
-            if (Utils.ttmSink != null) {
+            AutoCloseable sink = (Utils.ttmSink != null) ? Utils.ttmSink : Utils.expTtmSink;
+            if (sink != null) {
                 try {
-                    Utils.ttmSink.close();          // POISON -> writer join -> final commit
+                    sink.close();                   // POISON -> writer join -> final commit
                 } catch (Exception ce) {
                     if (primary != null) {
                         primary.addSuppressed(ce);  // merge into the routing exception
                     } else {
                         Utils.ttmSink = null;
+                        Utils.expTtmSink = null;
                         Utils.saveOutputToDb = false;
+                        Utils.dbOutputExpanded = false;
                         throw new RuntimeException("TTM DB final commit/close failed", ce);
                     }
                 }
                 Utils.ttmSink = null;
+                Utils.expTtmSink = null;
             }
             Utils.saveOutputToDb = false;
+            Utils.dbOutputExpanded = false;
         }
     }
 

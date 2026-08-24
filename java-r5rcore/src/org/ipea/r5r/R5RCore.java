@@ -234,10 +234,10 @@ public class R5RCore {
      */
     public void setDbOutput(String dbPath, int scenarioId,
                             int queueCapacity, int commitEvery, int compressionLevel,
-                            int walAutoCheckpoint) {
+                            int walAutoCheckpoint, boolean expanded) {
         if (!dbPath.equals("")) {
-            if (Utils.ttmSink != null)
-                throw new IllegalStateException("TtmSink already active");
+            if (Utils.ttmSink != null || Utils.expTtmSink != null)
+                throw new IllegalStateException("a DB sink is already active");
             if (queueCapacity < 1)  throw new IllegalArgumentException("queueCapacity must be >= 1");
             if (commitEvery  < 1)   throw new IllegalArgumentException("commitEvery must be >= 1");
             if (compressionLevel < 0 || compressionLevel > 9)
@@ -251,11 +251,13 @@ public class R5RCore {
             Utils.commitEvery       = commitEvery;
             Utils.compressionLevel  = compressionLevel;
             Utils.walAutoCheckpoint = walAutoCheckpoint;
+            Utils.dbOutputExpanded  = expanded;
         } else {
-            if (Utils.ttmSink != null)
-                throw new IllegalStateException("cannot reset while TtmSink active");
-            Utils.saveOutputToDb = false;
-            Utils.outputDbPath   = "";
+            if (Utils.ttmSink != null || Utils.expTtmSink != null)
+                throw new IllegalStateException("cannot reset while a DB sink is active");
+            Utils.saveOutputToDb    = false;
+            Utils.outputDbPath      = "";
+            Utils.dbOutputExpanded  = false;
         }
     }
 
@@ -426,9 +428,13 @@ public class R5RCore {
         travelTimeMatrixComputer.setDepartureDateTime(date, departureTime);
         travelTimeMatrixComputer.setTripDuration(maxWalkTime, maxBikeTime, maxCarTime, maxTripDuration);
 
-        RDataFrame out = travelTimeMatrixComputer.run();
-        this.routingProperties.reset();
-        return out;
+        // reset in finally: if run() throws (routing or DB sink failure), a stale
+        // working scenario must not leak into a resume in the same JVM session (review #3)
+        try {
+            return travelTimeMatrixComputer.run();
+        } finally {
+            this.routingProperties.reset();
+        }
     }
 
     // ----------------------------------  PARETO FRONTIERS  -----------------------------------------

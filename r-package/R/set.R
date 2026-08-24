@@ -353,14 +353,16 @@ set_output_dir <- function(r5r_network, output_dir) {
 #' @keywords internal
 set_output_db <- function(r5r_network, output_db, scenario_id = 0L,
                           queue_capacity = 64L, commit_every = 1000L,
-                          compression_level = 6L, wal_autocheckpoint = 0L) {
+                          compression_level = 6L, wal_autocheckpoint = 0L,
+                          expanded = FALSE) {
   checkmate::assert_string(output_db, null.ok = TRUE)
   if (!is.null(output_db)) {
     r5r_network$setDbOutput(output_db, as.integer(scenario_id),
                             as.integer(queue_capacity), as.integer(commit_every),
-                            as.integer(compression_level), as.integer(wal_autocheckpoint))
+                            as.integer(compression_level), as.integer(wal_autocheckpoint),
+                            isTRUE(expanded))
   } else {
-    r5r_network$setDbOutput("", 0L, 0L, 0L, 0L, 0L)
+    r5r_network$setDbOutput("", 0L, 0L, 0L, 0L, 0L, FALSE)
   }
 }
 

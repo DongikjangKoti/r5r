@@ -12,6 +12,7 @@ import com.conveyal.r5.transit.path.RouteSequence;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
 import org.ipea.r5r.R5.R5TravelTimeComputer;
+import org.ipea.r5r.Utils.ExpTtmSink;
 import org.ipea.r5r.Utils.TtmSink;
 import org.ipea.r5r.RDataFrame;
 import org.ipea.r5r.RoutingProperties;
@@ -111,6 +112,28 @@ public class TravelTimeMatrixComputer extends R5DataFrameProcess {
         long t0 = System.currentTimeMillis();
         OneOriginResult travelTimeResults = computer.computeTravelTimes();
 
+        // ---- direct-to-DB fast path: EXPANDED TTM (koti-db-sink) ----
+        if (Utils.saveOutputToDb && Utils.expTtmSink != null
+                && this.routingProperties.expandedTravelTimes) {
+            ExpTtmSink.OriginCollector collector =
+                new ExpTtmSink.OriginCollector(this.routingProperties.travelTimesBreakdown);
+            // travelTimesTable is built for structure only; addPathToDataframe routes every
+            // record into the collector, so the frame stays empty on this path.
+            RDataFrame structureOnly = buildDataFrameStructure(fromIds[index], 10);
+            populateDataFrame(travelTimeResults, structureOnly, collector);
+            byte[] payload = collector.encode(Utils.compressionLevel);
+            try {
+                Utils.expTtmSink.submit(new ExpTtmSink.Item(
+                    Utils.outputScenarioId, fromIds[index], index,
+                    collector.size(), this.routingProperties.travelTimesBreakdown,
+                    System.currentTimeMillis() - t0, payload));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(e);
+            }
+            return null;   // RDataFrame is never populated on this path
+        }
+
         // ---- direct-to-DB fast path (regular TTM only; koti-db-sink) ----
         if (Utils.saveOutputToDb && Utils.ttmSink != null
                 && !this.routingProperties.expandedTravelTimes) {
@@ -138,7 +161,7 @@ public class TravelTimeMatrixComputer extends R5DataFrameProcess {
         }
         // ---- legacy path ----
         RDataFrame travelTimesTable = buildDataFrameStructure(fromIds[index], 10);
-        populateDataFrame(travelTimeResults, travelTimesTable);
+        populateDataFrame(travelTimeResults, travelTimesTable, null);
 
         if (travelTimesTable.nRow() > 0) {
             return travelTimesTable;
@@ -147,9 +170,10 @@ public class TravelTimeMatrixComputer extends R5DataFrameProcess {
         }
     }
 
-    private void populateDataFrame(OneOriginResult travelTimeResults, RDataFrame travelTimesTable) {
+    private void populateDataFrame(OneOriginResult travelTimeResults, RDataFrame travelTimesTable,
+                                   ExpTtmSink.OriginCollector collector) {
         if (this.routingProperties.expandedTravelTimes) {
-            populateExpandedResults(travelTimeResults, travelTimesTable);
+            populateExpandedResults(travelTimeResults, travelTimesTable, collector);
         } else {
             populateRegularResults(travelTimeResults, travelTimesTable);
         }
@@ -177,7 +201,8 @@ public class TravelTimeMatrixComputer extends R5DataFrameProcess {
         }
     }
 
-    private void populateExpandedResults(OneOriginResult travelTimeResults, RDataFrame travelTimesTable) {
+    private void populateExpandedResults(OneOriginResult travelTimeResults, RDataFrame travelTimesTable,
+                                         ExpTtmSink.OriginCollector collector) {
         // extract travel paths, if required
         Multimap<Integer, PathBreakdown>[] pathBreakdown = extractPathResults(travelTimeResults.paths, travelTimeResults.travelTimes);
 
@@ -190,17 +215,18 @@ public class TravelTimeMatrixComputer extends R5DataFrameProcess {
         if (routingProperties.searchType == SearchType.ARRIVE_BY) {
             for (int destination = 0; destination < travelTimeResults.travelTimes.nPoints; destination++) {
                 // fill travel details for destination
-                filterLatestBeforeArrivalTime(travelTimesTable, pathBreakdown, destination);
+                filterLatestBeforeArrivalTime(travelTimesTable, pathBreakdown, destination, collector);
             }
         } else {
             for (int destination = 0; destination < travelTimeResults.travelTimes.nPoints; destination++) {
                 // fill travel details for destination
-                populateTravelTimesBreakdown(travelTimesTable, pathBreakdown, destination);
+                populateTravelTimesBreakdown(travelTimesTable, pathBreakdown, destination, collector);
             }
         }
     }
 
-    private void filterLatestBeforeArrivalTime(RDataFrame travelTimesTable, Multimap<Integer, PathBreakdown>[] pathBreakdown, int destination) {
+    private void filterLatestBeforeArrivalTime(RDataFrame travelTimesTable, Multimap<Integer, PathBreakdown>[] pathBreakdown, int destination,
+                                               ExpTtmSink.OriginCollector collector) {
         if (this.routingProperties.expandedTravelTimes & pathBreakdown != null) {
             if (!pathBreakdown[destination].isEmpty()) {
                 // for this destination return the latest departing trip that still arrives before the arrival time
@@ -216,7 +242,7 @@ public class TravelTimeMatrixComputer extends R5DataFrameProcess {
                         int arrivalTime = departureTime + (int) (path.getTotalTime() * 60);
                         monteCarloDrawsForPath++;
                         if (arrivalTime <= desiredArrivalTime) {
-                            addPathToDataframe(travelTimesTable, destination, monteCarloDrawsForPath, path);
+                            addPathToDataframe(travelTimesTable, destination, monteCarloDrawsForPath, path, collector);
                             return; // only return the first trip per destination that arrives before the desiredArrivalTime cutoff
                             // since we are searching in descending order of departure times it will be the lastest
                             // departure arriving before our desired time
@@ -239,7 +265,7 @@ public class TravelTimeMatrixComputer extends R5DataFrameProcess {
 
                         if (arrivalTime <= desiredArrivalTime) {
                             directPath.departureTime = Utils.getTimeFromSeconds(departureTime);
-                            addPathToDataframe(travelTimesTable, destination, monteCarloDrawsForPath, directPath);
+                            addPathToDataframe(travelTimesTable, destination, monteCarloDrawsForPath, directPath, collector);
                             return; // only return the first trip per destination that arrives before the desiredArrivalTime cutoff
                             // since we are searching in descending order of departure times it will be the lastest
                             // departure arriving before our desired time
@@ -304,7 +330,8 @@ public class TravelTimeMatrixComputer extends R5DataFrameProcess {
 
     }
 
-    private void populateTravelTimesBreakdown(RDataFrame travelTimesTable, Multimap<Integer, PathBreakdown>[] pathBreakdown, int destination) {
+    private void populateTravelTimesBreakdown(RDataFrame travelTimesTable, Multimap<Integer, PathBreakdown>[] pathBreakdown, int destination,
+                                              ExpTtmSink.OriginCollector collector) {
         if (this.routingProperties.expandedTravelTimes & pathBreakdown != null) {
             if (!pathBreakdown[destination].isEmpty()) {
                 for (int departure = secondsFromMidnight;
@@ -317,7 +344,7 @@ public class TravelTimeMatrixComputer extends R5DataFrameProcess {
                     int monteCarloDrawsForPath = 0;
                     for (PathBreakdown path : pathCollection) {
                         monteCarloDrawsForPath++;
-                        addPathToDataframe(travelTimesTable, destination, monteCarloDrawsForPath, path);
+                        addPathToDataframe(travelTimesTable, destination, monteCarloDrawsForPath, path, collector);
                     }
 
                     // if there are less routes than expected check direct paths
@@ -334,7 +361,7 @@ public class TravelTimeMatrixComputer extends R5DataFrameProcess {
 
                         for (int mc = monteCarloDrawsForPath + 1; mc <= monteCarloDrawsPerMinute; mc++) {
                             directPath.departureTime = Utils.getTimeFromSeconds(departure);
-                            addPathToDataframe(travelTimesTable, destination, mc, directPath);
+                            addPathToDataframe(travelTimesTable, destination, mc, directPath, collector);
                         }
                     }
                 }
@@ -342,7 +369,19 @@ public class TravelTimeMatrixComputer extends R5DataFrameProcess {
         }
     }
 
-    private void addPathToDataframe(RDataFrame travelTimesTable, int destination, int monteCarloDrawsForPath, PathBreakdown path) {
+    private void addPathToDataframe(RDataFrame travelTimesTable, int destination, int monteCarloDrawsForPath, PathBreakdown path,
+                                    ExpTtmSink.OriginCollector collector) {
+        // Emitter split point (strategy doc §3.6): ALL semantic processing (path extraction,
+        // ARRIVE_BY filtering, direct-path supplement, unreachable synthesis, draw numbering)
+        // happens upstream of this call, so both consumers see identical records.
+        if (collector != null) {
+            collector.add(destination, monteCarloDrawsForPath,
+                path.departureTime, path.routes,
+                path.getCombinedTravelTime() > 0 ? path.getCombinedTravelTime() : path.getTotalTime(),
+                path.getAccessTime(), path.getWaitTime(), path.getRideTime(),
+                path.getTransferTime(), path.getEgressTime(), path.nRides);
+            return;
+        }
         travelTimesTable.append();
 
         // set destination id

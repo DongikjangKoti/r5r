@@ -36,7 +36,9 @@ public class Utils {
     static public int     commitEvery       = 1000;
     static public int     compressionLevel  = 6;
     static public int     walAutoCheckpoint = 0;      // 0 = SQLite default (1000 pages)
+    static public boolean dbOutputExpanded  = false;  // true -> ExpTtmSink, false -> TtmSink
     static public TtmSink ttmSink           = null;   // created/closed only inside R5Process.run()
+    static public ExpTtmSink expTtmSink     = null;   // created/closed only inside R5Process.run()
 
     public synchronized static Level getLogLevel() { return logLevel; }
     public synchronized static void setLogLevel(Level l) { logLevel = l; }

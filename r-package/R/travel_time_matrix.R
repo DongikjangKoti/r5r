@@ -179,6 +179,31 @@ travel_time_matrix <- function(r5r_network,
   checkmate::assert_class(r5r_network, "r5r_network")
   r5r_network <- r5r_network@jcore
 
+  max_walk_time <- assign_max_street_time(
+    max_walk_time,
+    walk_speed,
+    max_trip_duration,
+    "walk"
+  )
+  max_bike_time <- assign_max_street_time(
+    max_bike_time,
+    bike_speed,
+    max_trip_duration,
+    "bike"
+  )
+  max_car_time <- assign_max_street_time(
+    max_car_time,
+    8, # 8 km/h, R5's default.
+    max_trip_duration,
+    "car"
+  )
+  max_trip_duration <- assign_max_trip_duration(
+    max_trip_duration,
+    mode_list,
+    max_walk_time,
+    max_bike_time
+  )
+
   # direct-to-DB output orchestration (koti-db-sink) --------------------------
   # Public function runs ONCE; resume is input substitution (origins <- todo),
   # never a recursive travel_time_matrix() call.
@@ -205,6 +230,10 @@ travel_time_matrix <- function(r5r_network,
            "origin/destination IDs and coordinates.", call. = FALSE)
     }
 
+    # meta is built AFTER assign_max_* so it records EFFECTIVE parameters, and it
+    # binds the full routing semantics: hourly new_carspeeds enters as a hash, so a
+    # resume with the wrong hour's speeds is refused instead of silently mixed (#1).
+    net_dat <- file.path(r5r_network$getDataPath(), "network.dat")
     ttm_meta <- list(
       schema_version      = "1",
       payload_version     = "1",
@@ -215,12 +244,28 @@ travel_time_matrix <- function(r5r_network,
       sentinel            = if (max_trip_duration <= 254) "uint8_255" else "uint16_65535",
       width               = if (max_trip_duration <= 254) "1" else "2",
       mode                = paste(mode, collapse = ";"),
+      mode_egress         = paste(mode_egress, collapse = ";"),
       departure_datetime  = format(departure_datetime, "%Y-%m-%d %H:%M:%S"),
       time_window_size    = as.character(time_window),
       max_trip_duration   = as.character(max_trip_duration),
+      max_walk_time       = as.character(max_walk_time),
+      max_bike_time       = as.character(max_bike_time),
+      max_car_time        = as.character(max_car_time),
+      walk_speed          = as.character(walk_speed),
+      bike_speed          = as.character(bike_speed),
+      max_rides           = as.character(max_rides),
+      max_lts             = as.character(max_lts),
+      max_fare            = as.character(max_fare),
+      fare_hash           = ttm_object_hash(fare_structure),
+      draws_per_minute    = as.character(draws_per_minute),
+      carspeed_scale      = as.character(carspeed_scale),
+      carspeeds_hash      = ttm_object_hash(new_carspeeds),
+      new_lts_hash        = ttm_object_hash(new_lts),
       percentiles         = paste(percentiles, collapse = ","),
       n_dest              = as.character(nrow(destinations)),
       network_file        = basename(r5r_network$getDataPath()),
+      network_size        = as.character(file.size(net_dat)),
+      network_mtime       = as.character(as.integer(file.mtime(net_dat))),
       r5r_version         = as.character(utils::packageVersion("r5r")),
       r5_version          = r5r_env$r5_jar_version,
       sqlite_jdbc_version = "3.53.2.1"
@@ -241,31 +286,6 @@ travel_time_matrix <- function(r5r_network,
   destinations <- res$destinations
 
 
-  max_walk_time <- assign_max_street_time(
-    max_walk_time,
-    walk_speed,
-    max_trip_duration,
-    "walk"
-  )
-  max_bike_time <- assign_max_street_time(
-    max_bike_time,
-    bike_speed,
-    max_trip_duration,
-    "bike"
-  )
-  max_car_time <- assign_max_street_time(
-    max_car_time,
-    8, # 8 km/h, R5's default.
-    max_trip_duration,
-    "car"
-  )
-  max_trip_duration <- assign_max_trip_duration(
-    max_trip_duration,
-    mode_list,
-    max_walk_time,
-    max_bike_time
-  )
-
   set_time_window(r5r_network, time_window)
   set_percentiles(r5r_network, percentiles)
   set_monte_carlo_draws(r5r_network, draws_per_minute, time_window)
@@ -279,9 +299,6 @@ travel_time_matrix <- function(r5r_network,
   set_fare_structure(r5r_network, fare_structure)
   set_max_fare(r5r_network, max_fare)
   set_output_dir(r5r_network, output_dir)
-  set_output_db(r5r_network, output_db, scenario_id,
-                db_queue_capacity, db_commit_every,
-                db_compression_level, db_wal_autocheckpoint)
   set_expanded_travel_times(r5r_network, FALSE)
   set_breakdown(r5r_network, FALSE)
   r5r_network$setSearchType("DEPART_FROM")
@@ -289,6 +306,13 @@ travel_time_matrix <- function(r5r_network,
   # SCENARIOS -------------------------------------------
   set_new_congestion(r5r_network, new_carspeeds, carspeed_scale)
   set_new_lts(r5r_network, new_lts)
+
+  # DB flag is armed LAST (#4): if any setter above throws, R5Process.run() never
+  # starts and its finally-cleanup never runs - the flag must not be left on.
+  set_output_db(r5r_network, output_db, scenario_id,
+                db_queue_capacity, db_commit_every,
+                db_compression_level, db_wal_autocheckpoint,
+                expanded = FALSE)
 
 
   # call r5r_network method and process result -------------------------------
