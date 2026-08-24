@@ -102,7 +102,7 @@ ttm_init_or_validate_db <- function(db_path, destinations_full, meta_list, scena
 
   ttm_validate_current_meta(meta_list)           # BEFORE the is_new branch
 
-  is_new <- !file.exists(db_path)
+  is_new <- !file.exists(db_path) || file.size(db_path) == 0  # 0-byte file = empty DB
   con <- DBI::dbConnect(RSQLite::SQLite(), db_path)
   on.exit(DBI::dbDisconnect(con), add = TRUE)
 
