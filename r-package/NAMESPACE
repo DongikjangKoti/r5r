@@ -7,6 +7,8 @@ export(check_transit_availability)
 export(detailed_itineraries)
 export(download_r5)
 export(expanded_travel_time_matrix)
+export(expttm_finalize)
+export(expttm_read_origin)
 export(find_snap)
 export(get_gtfs_errors)
 export(isochrone)
@@ -21,11 +23,15 @@ export(street_network_bbox)
 export(street_network_to_sf)
 export(transit_network_to_sf)
 export(travel_time_matrix)
+export(ttm_finalize)
+export(ttm_read_origin)
 export(write_fare_structure)
 importClassesFrom(rJava,jobjRef)
-importFrom(data.table,"%between%")
-importFrom(data.table,"%chin%")
-importFrom(data.table,"%like%")
-importFrom(data.table,":=")
-importFrom(data.table,.N)
+importFrom(data.table,
+  "%between%",
+  "%chin%",
+  "%like%",
+  ":=",
+  .N
+)
 importFrom(lifecycle,deprecated)

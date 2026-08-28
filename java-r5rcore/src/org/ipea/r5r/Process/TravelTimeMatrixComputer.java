@@ -71,6 +71,8 @@ public class TravelTimeMatrixComputer extends R5DataFrameProcess {
         double totalTime;
 
         String routes;
+        String firstBoardStop = "";
+        String lastAlightStop = "";
         int nRides;
 
         public void unreachable() {
@@ -84,6 +86,8 @@ public class TravelTimeMatrixComputer extends R5DataFrameProcess {
             this.totalTime = Integer.MAX_VALUE;
 
             this.routes = directModes.toString();
+            this.firstBoardStop = "";
+            this.lastAlightStop = "";
             this.nRides = 0;
         }
     }
@@ -293,6 +297,21 @@ public class TravelTimeMatrixComputer extends R5DataFrameProcess {
                     // extract the route id's
                     String[] path = routeSequence.detailsWithGtfsIds(this.transportNetwork.transitLayer, csvOptions);
 
+                    // KOTI patch: first boarding stop / last alighting stop of this route sequence.
+                    // Read straight from StopSequence (no pipe-string parsing).
+                    String firstBoardStop = "";
+                    String lastAlightStop = "";
+                    if (routeSequence.stopSequence.boardStops != null
+                            && !routeSequence.stopSequence.boardStops.isEmpty()) {
+                        firstBoardStop = this.transportNetwork.transitLayer.stopString(
+                                routeSequence.stopSequence.boardStops.get(0),
+                                csvOptions.stopRepresentation);
+                        lastAlightStop = this.transportNetwork.transitLayer.stopString(
+                                routeSequence.stopSequence.alightStops.get(
+                                        routeSequence.stopSequence.alightStops.size() - 1),
+                                csvOptions.stopRepresentation);
+                    }
+
                     for (PathResult.Iteration iteration : iterations) {
                         PathBreakdown breakdown = new PathBreakdown();
                         breakdown.departureTime = Utils.getTimeFromSeconds(iteration.departureTime);
@@ -304,11 +323,15 @@ public class TravelTimeMatrixComputer extends R5DataFrameProcess {
                         breakdown.totalTime = iteration.totalTime / 60.0f;
 
                         breakdown.routes = path[0];
+                        breakdown.firstBoardStop = firstBoardStop;
+                        breakdown.lastAlightStop = lastAlightStop;
                         breakdown.nRides = routeSequence.stopSequence.rideTimesSeconds == null ? 0 : routeSequence.stopSequence.rideTimesSeconds.size();
 
                         if (iteration.departureTime == 0) {
                             breakdown.departureTime = "";
                             breakdown.routes = this.directModes.toString();
+                            breakdown.firstBoardStop = "";
+                            breakdown.lastAlightStop = "";
                         }
 
                         pathResults[d].put(iteration.departureTime, breakdown);
@@ -377,6 +400,7 @@ public class TravelTimeMatrixComputer extends R5DataFrameProcess {
         if (collector != null) {
             collector.add(destination, monteCarloDrawsForPath,
                 path.departureTime, path.routes,
+                path.firstBoardStop, path.lastAlightStop,
                 path.getCombinedTravelTime() > 0 ? path.getCombinedTravelTime() : path.getTotalTime(),
                 path.getAccessTime(), path.getWaitTime(), path.getRideTime(),
                 path.getTransferTime(), path.getEgressTime(), path.nRides);
@@ -390,6 +414,8 @@ public class TravelTimeMatrixComputer extends R5DataFrameProcess {
 
         travelTimesTable.set("departure_time", path.departureTime);
         travelTimesTable.set("routes", path.routes);
+        travelTimesTable.set("first_board_stop", path.firstBoardStop);
+        travelTimesTable.set("last_alight_stop", path.lastAlightStop);
         travelTimesTable.set("total_time", path.getCombinedTravelTime() > 0 ? path.getCombinedTravelTime() : path.getTotalTime());
 
         if (routingProperties.travelTimesBreakdown) {
@@ -430,6 +456,8 @@ public class TravelTimeMatrixComputer extends R5DataFrameProcess {
             }
 
             travelTimesTable.addStringColumn("routes", "");
+            travelTimesTable.addStringColumn("first_board_stop", "");
+            travelTimesTable.addStringColumn("last_alight_stop", "");
 
             if (this.routingProperties.travelTimesBreakdown) {
                 travelTimesTable.addIntegerColumn("n_rides", 0);

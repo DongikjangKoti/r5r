@@ -206,7 +206,7 @@ expanded_travel_time_matrix <- function(r5r_network,
     expttm_meta <- list(
       schema_version      = "1",
       payload_version     = "1",
-      layout              = "1",
+      layout              = "2",
       codec               = "1",
       compression_level   = as.character(db_compression_level),
       breakdown           = as.character(isTRUE(breakdown)),
@@ -323,6 +323,8 @@ expanded_travel_time_matrix <- function(r5r_network,
           transfer_time = NA_integer_,
           egress_time = NA_integer_,
           routes = NA_character_,
+          first_board_stop = NA_character_,
+          last_alight_stop = NA_character_,
           n_rides = NA_integer_,
           total_time = NA_integer_
         )
@@ -330,7 +332,12 @@ expanded_travel_time_matrix <- function(r5r_network,
     } else {
       travel_times[
         total_time > max_trip_duration,
-        `:=`(routes = NA_character_, total_time = NA_integer_)
+        `:=`(
+          routes = NA_character_,
+          first_board_stop = NA_character_,
+          last_alight_stop = NA_character_,
+          total_time = NA_integer_
+        )
       ]
     }
   }
