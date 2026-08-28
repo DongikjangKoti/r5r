@@ -243,7 +243,7 @@ expttm_read_origin <- function(con, scenario_id, origin_id, from_id = origin_id,
        FROM expttm_chunk WHERE scenario_id = ? AND origin_id = ? ORDER BY chunk_id",
     params = list(scenario_id, origin_id))
   if (nrow(r) == 0) return(NULL)
-  stopifnot(all(r$codec == 1L), all(r$payload_version == 1L), all(r$layout == 1L))
+  stopifnot(all(r$codec == 1L), all(r$payload_version == 1L), all(r$layout == 2L))
 
   didx <- DBI::dbGetQuery(con, "SELECT idx, grid_id FROM dest_index ORDER BY idx")
   out <- vector("list", nrow(r))
@@ -281,6 +281,17 @@ expttm_read_origin <- function(con, scenario_id, origin_id, from_id = origin_id,
     }
     Encoding(dict) <- "UTF-8"
     stopifnot(pos == length(raw_v) + 1L)      # full consumption = layout intact
+    # layout=2: dict entry = routes \u001F first_board_stop \u001F last_alight_stop.
+    # strsplit() drops trailing empty fields (direct paths have two), so split by position.
+    .sep <- "\u001f"
+    .p1 <- regexpr(.sep, dict, fixed = TRUE)
+    stopifnot(all(.p1 > 0L))                  # every key must carry both separators
+    .rest       <- substr(dict, .p1 + 1L, nchar(dict))
+    dict_routes <- substr(dict, 1L, .p1 - 1L)
+    .p2 <- regexpr(.sep, .rest, fixed = TRUE)
+    stopifnot(all(.p2 > 0L))
+    dict_board  <- substr(.rest, 1L, .p2 - 1L)
+    dict_alight <- substr(.rest, .p2 + 1L, nchar(.rest))
 
     dep_chr <- ifelse(dep_sec < 0, "", sprintf("%02d:%02d:%02d",
                  dep_sec %/% 3600L, (dep_sec %% 3600L) %/% 60L, dep_sec %% 60L))
@@ -299,10 +310,14 @@ expttm_read_origin <- function(con, scenario_id, origin_id, from_id = origin_id,
       df$ride_time     <- ifelse(ride_t     == 65535L, 2147483647, ride_t / 10)
       df$transfer_time <- ifelse(transfer_t == 65535L, 2147483647, transfer_t / 10)
       df$egress_time   <- ifelse(egress_t   == 65535L, 2147483647, egress_t / 10)
-      df$routes        <- dict[route_cd + 1L]
-      df$n_rides       <- n_rides
+      df$routes           <- dict_routes[route_cd + 1L]
+      df$first_board_stop <- dict_board[route_cd + 1L]
+      df$last_alight_stop <- dict_alight[route_cd + 1L]
+      df$n_rides          <- n_rides
     } else {
-      df$routes        <- dict[route_cd + 1L]
+      df$routes           <- dict_routes[route_cd + 1L]
+      df$first_board_stop <- dict_board[route_cd + 1L]
+      df$last_alight_stop <- dict_alight[route_cd + 1L]
     }
     df$total_time <- total
     out[[ci]] <- df
@@ -317,6 +332,8 @@ expttm_read_origin <- function(con, scenario_id, origin_id, from_id = origin_id,
     bad <- df$total_time > cutoff
     if (any(bad)) {
       df$routes[bad] <- NA_character_
+      df$first_board_stop[bad] <- NA_character_
+      df$last_alight_stop[bad] <- NA_character_
       df$total_time[bad] <- NA_integer_
       if ("access_time" %in% names(df)) {
         df$access_time[bad] <- NA_integer_;   df$wait_time[bad] <- NA_integer_

@@ -45,6 +45,9 @@ public final class ExpTtmSink implements AutoCloseable {
 
     public static final int PAYLOAD_VERSION = 1;
     public static final int LAYOUT_COLUMNAR = 1;
+    /** layout 2: dict key = routes \u001F firstBoardStop \u001F lastAlightStop */
+    public static final int LAYOUT_COLUMNAR_STOPS = 2;
+    public static final char DICT_SEP = '\u001f';
     public static final String EXPECTED_SCHEMA_VERSION = "1";
 
     public static final int SENT_U16 = 0xFFFF;        // unreachable total / empty departure
@@ -140,7 +143,7 @@ public final class ExpTtmSink implements AutoCloseable {
                 // ONE origin = ONE transaction (chunk + done), committed immediately.
                 a.setInt(1, it.scenarioId());   a.setString(2, it.originId());
                 a.setInt(3, it.nRecords());     a.setInt(4, PAYLOAD_VERSION);
-                a.setInt(5, LAYOUT_COLUMNAR);   a.setInt(6, it.breakdown() ? 1 : 0);
+                a.setInt(5, LAYOUT_COLUMNAR_STOPS);   a.setInt(6, it.breakdown() ? 1 : 0);
                 a.setBytes(7, it.payload());    a.executeUpdate();
 
                 b.setInt(1, it.scenarioId());   b.setString(2, it.originId());
@@ -226,6 +229,7 @@ public final class ExpTtmSink implements AutoCloseable {
         }
 
         public void add(int destIdx, int drawNumber, String departureTime, String routes,
+                        String firstBoardStop, String lastAlightStop,
                         double totalTime1dp,
                         double access1dp, double wait1dp, double ride1dp,
                         double transfer1dp, double egress1dp, int rides) {
@@ -237,12 +241,14 @@ public final class ExpTtmSink implements AutoCloseable {
             depSec[n] = depSeconds(departureTime);
             draw[n] = (short) drawNumber;
             totalT[n] = tenths(totalTime1dp);
-            String key = routes == null ? "" : routes;
+            String key = (routes == null ? "" : routes)
+                    + DICT_SEP + (firstBoardStop == null ? "" : firstBoardStop)
+                    + DICT_SEP + (lastAlightStop == null ? "" : lastAlightStop);
             Integer code = dict.get(key);
             if (code == null) {
                 if (dictList.size() == MAX_LOCAL_ROUTES)
                     throw new IllegalStateException("expTTM origin exceeds " + MAX_LOCAL_ROUTES +
-                            " distinct route sequences (v1 fail-fast)");
+                            " distinct route+stop sequences (v1 fail-fast)");
                 code = dictList.size();
                 dict.put(key, code);
                 dictList.add(key);
@@ -259,12 +265,13 @@ public final class ExpTtmSink implements AutoCloseable {
         public int size() { return n; }
 
         /**
-         * Payload (layout=1, little-endian, gzip):
+         * Payload (layout=2, little-endian, gzip):
          *   header : n_records u32, n_dict u32, has_breakdown u8
          *   columns: to_idx u32[n], dep_sec u32[n], draw u8[n],
          *            total_tenths u16[n], route_code u16[n]
          *   if breakdown: access,wait,ride,transfer,egress u16[n] (tenths), n_rides u8[n]
-         *   dict   : per code: len u16 + UTF-8 bytes
+         *   dict   : per code: len u16 + UTF-8 bytes; content =
+         *            routes \u001F firstBoardStop \u001F lastAlightStop
          */
         public byte[] encode(int level) {
             int dictBytes = 0;
